@@ -11,25 +11,29 @@ export type SortDirection = 'asc' | 'desc';
 
 // Pool data structure
 export interface PoolData {
-  index?: number; // Optional index for internal tracking
+  id: string;
   poolAddress: string;
   gaugeAddress: string;
   symbol: string;
   token0: string;
   token1: string;
+  token0Address: string;
+  token1Address: string;
+  isV2?: boolean;
+  fee: string;
   tvl: number;
-  weeklyAPR: number;
-  yearlyAPR: number;
-  rewardRate: string;
-  periodFinish: string;
-  rewardTokenPrice?: number; // Optional for calculations
-  raw?: {
-    reserve0: string;
-    reserve1: string;
-    token0Price: number;
-    token1Price: number;
-    rewardRateRaw: string;
-    periodFinishRaw: string;
+  tickSpacing: number;
+  liquidity: string;
+  activeTvl?: number;
+  weeklyRewardsUsd: number;
+  apr: number;
+  currentTick?: number;
+  currentPrice?: number;
+}
+
+export interface TokenPriceData {
+  [tokenAddress: string]: {
+    usd: number;
   };
 }
 

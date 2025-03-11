@@ -1,13 +1,14 @@
 // src/services/sonic.ts
 import { getContract, formatEther } from 'viem';
 import { publicClient } from '../client';
-import config from '../../config';
 import { Protocol, PoolData } from '../../types';
-
-// Import ABIs - use only what's available
-import FLOW_VOTER_ABI from '../abis/flowVoterAbi';
-import FLOW_GAUGE_ABI from '../abis/flowGaugeAbi';
+import { 
+  getContractAddresses, 
+  getFlowVoterContract, 
+  getTokenContract,
+} from './helper';
 import CL_TOKEN_ABI from '../abis/clTokenAbi';
+import CL_GAUGE_ABI from '../abis/clGaugeAbi';
 
 export interface GetPoolsParams {
   protocol: Protocol;
@@ -15,160 +16,213 @@ export interface GetPoolsParams {
 }
 
 const sonicApi = () => {
-  const getContractAddresses = (protocol: Protocol) => {
-    return protocol === 'equalizer' 
-      ? config.equalizer 
-      : config.shadow;
-  };
-
-  const getFlowVoterContract = (protocol: Protocol) => {
-    const addresses = getContractAddresses(protocol);
-    
-    return getContract({
-      address: addresses.FLOW_VOTER_ADDR as `0x${string}`,
-      abi: FLOW_VOTER_ABI,
-      client: publicClient,
-    });
-  };
-
-  const getPools = async ({ protocol, onFailed }: GetPoolsParams): Promise<PoolData[]> => {
+  const getCLPools = async (protocol: Protocol): Promise<PoolData[]> => {
     try {
+      const addresses = getContractAddresses(protocol);
       const flowVoterContract = getFlowVoterContract(protocol);
+      const rewardToken = addresses.REWARD_TOKEN;
       
-      // Get total number of pools
-      const poolLengthResult = await flowVoterContract.read.length();
-      const poolLength = poolLengthResult;
-      console.log(`Found ${Number(poolLength)} pools for ${protocol}`);
+      // Get all gauges first
+      console.log("Getting all gauges...");
+      const gaugesResponse = await flowVoterContract.read.getAllGauges() as any[];
+      const allGauges = gaugesResponse.flat();
+      console.log(`Found ${allGauges.length} gauges total`);
       
-      const fetchedPools: PoolData[] = [];
+      // Filter for CL gauges
+      console.log("Filtering for CL gauges...");
+      const clGauges: { gauge: string, pool: string }[] = [];
       
-      // Process pools in batches to avoid overwhelming the RPC
-      const batchSize = 10;
-      for (let i = 0; i < Number(poolLength); i += batchSize) {
-        const batch: Promise<PoolData | null>[] = [];
-        for (let j = i; j < Math.min(i + batchSize, Number(poolLength)); j++) {
-          batch.push(processSinglePool({ 
-            protocol,
-            index: j,
-          }));
+      for (const gauge of allGauges) {
+        try {
+          const isClGauge = await flowVoterContract.read.isClGauge([gauge]) as boolean;
+          if (isClGauge) {
+            // Get pool address for the gauge
+            const poolAddress = await flowVoterContract.read.poolForGauge([gauge]) as string;
+            if (poolAddress && poolAddress !== '0x0000000000000000000000000000000000000000') {
+              clGauges.push({ gauge, pool: poolAddress });
+            }
+          }
+        } catch (e) {
+          console.warn(`Error checking gauge ${gauge}:`, e);
         }
-        
-        const results = await Promise.all(batch);
-        fetchedPools.push(...results.filter((pool): pool is PoolData => pool !== null));
       }
       
-      return fetchedPools;
+      console.log(`Found ${clGauges.length} CL pools with gauges`);
+      
+      // Process each CL pool
+      const clPools: PoolData[] = [];
+      
+      for (const { gauge, pool } of clGauges) {
+        try {
+          const poolData = await processClPool(pool, gauge, rewardToken, protocol);
+          if (poolData) {
+            clPools.push(poolData);
+          }
+        } catch (error) {
+          console.warn(`Error processing CL pool ${pool}:`, error);
+        }
+      }
+      
+      // Sort by TVL (highest first) like in the vfat.tools interface
+      return clPools.sort((a, b) => b.tvl - a.tvl);
     } catch (error) {
-      console.error('Error fetching pools:', error);
-      onFailed && onFailed(error as Error);
+      console.error("Error fetching CL pools:", error);
       return [];
     }
   };
 
-  const processSinglePool = async ({ 
-    protocol, 
-    index,
-  }: {
-    protocol: Protocol;
-    index: number;
-  }): Promise<PoolData | null> => {
+  const processClPool = async (
+    poolAddress: string, 
+    gaugeAddress: string, 
+    rewardToken: string,
+    protocol: Protocol
+  ): Promise<PoolData | null> => {
     try {
-      const addresses = getContractAddresses(protocol);
-      const flowVoterContract = getFlowVoterContract(protocol);
+      console.log(`Processing CL pool ${poolAddress}`);
       
-      // Get pool address
-      const poolAddressResult = await flowVoterContract.read.pools([BigInt(index)]);
-      const poolAddress = poolAddressResult as `0x${string}`;
+      // Create contract instances
+      const gaugeContract = getContract({
+        address: gaugeAddress as `0x${string}`,
+        abi: CL_GAUGE_ABI,
+        client: publicClient
+      });
       
-      // Get gauge for this pool
-      const gaugeAddressResult = await flowVoterContract.read.gauges([poolAddress]);
-      const gaugeAddress = gaugeAddressResult as `0x${string}`;
+      const poolContract = getContract({
+        address: poolAddress as `0x${string}`,
+        abi: CL_TOKEN_ABI,
+        client: publicClient
+      });
       
-      // Skip pools without gauges
-      if (gaugeAddress === '0x0000000000000000000000000000000000000000') {
+      // Get token addresses
+      let token0Address = '';
+      let token1Address = '';
+      let token0Symbol = '';
+      let token1Symbol = '';
+      
+      try {
+        token0Address = await poolContract.read.token0() as string;
+        token1Address = await poolContract.read.token1() as string;
+        
+        // Get token details
+        const token0Contract = getTokenContract(token0Address);
+        const token1Contract = getTokenContract(token1Address);
+        
+        token0Symbol = await token0Contract.read.symbol() as string;
+        token1Symbol = await token1Contract.read.symbol() as string;
+      } catch (error) {
+        console.warn(`Error getting token info for pool ${poolAddress}:`, error);
         return null;
       }
       
-      // token contract using CL_TOKEN_ABI
-      const tokenContract = getContract({
-        address: poolAddress,
-        abi: CL_TOKEN_ABI,
-        client: publicClient,
-      });
-      
-      // Get basic token info
-      let symbol = 'Pool-' + index;
-      let totalSupply = 0n;
-      
+      // Get tickSpacing (for CL identifier)
+      let tickSpacing = 0;
       try {
-        // Try to get the symbol
-        const symbolResult = await tokenContract.read.symbol();
-        // Explicitly cast the result to string
-        symbol = String(symbolResult);
-      } catch (e) {
-        console.warn('Failed to get symbol, using default');
+        tickSpacing = await poolContract.read.tickSpacing() as number;
+      } catch (error) {
+        console.warn(`Error getting tickSpacing for pool ${poolAddress}:`, error);
       }
       
+      // Format CL identifier like "CL1-WETH/superOETHb" (from image)
+      // The number after CL seems to be related to tickSpacing
+      const clIdentifier = getClIdentifier(tickSpacing, token0Symbol, token1Symbol);
+      
+      // Get liquidity data
+      let liquidity = BigInt(0);
       try {
-        // Try to get the total supply
-        const totalSupplyResult = await tokenContract.read.totalSupply();
-        totalSupply = totalSupplyResult as bigint;
-      } catch (e) {
-        console.warn('Failed to get totalSupply, using 0');
+        liquidity = await poolContract.read.liquidity() as bigint;
+      } catch (error) {
+        console.warn(`Error getting liquidity for pool ${poolAddress}:`, error);
       }
       
-      // gauge contract
-      const gaugeContract = getContract({
-        address: gaugeAddress,
-        abi: FLOW_GAUGE_ABI,
-        client: publicClient,
-      });
+      // Get token prices and calculate TVL
+      const token0Price = 1000; // Placeholder - replace with actual price fetch
+      const token1Price = 1000; // Placeholder - replace with actual price fetch
       
-      // Get reward data
-      let rewardRate = 0n;
-      let periodFinish = 0n;
+      // Simplistic TVL calculation - in production, would need more complex formula
+      // based on token reserves and price ranges
+      const tvl = parseFloat(formatEther(liquidity)) * (token0Price + token1Price) / 2;
       
+      // Get reward rate for APR calculation
+      let rewardRate = BigInt(0);
       try {
-        const rewardRateResult = await gaugeContract.read.rewardRate([addresses.REWARD_TOKEN as `0x${string}`]);
-        rewardRate = rewardRateResult as bigint;;
-        
-        const periodFinishResult = await gaugeContract.read.periodFinish([addresses.REWARD_TOKEN as `0x${string}`]);
-        periodFinish = periodFinishResult as bigint;
-      } catch (e) {
-        console.warn('Error fetching reward data:', e);
+        try {
+          rewardRate = await gaugeContract.read.rewardRate([rewardToken]) as bigint;
+        } catch (e) {
+          rewardRate = await gaugeContract.read.rewardRate() as bigint;
+        }
+      } catch (error) {
+        console.warn(`Error getting reward rate for gauge ${gaugeAddress}:`, error);
       }
       
-      // Placeholder values for now
-      const tvl = parseFloat(formatEther(totalSupply)) * 2; // Simple estimate
-      const rewardTokenPrice = 1.0; // Placeholder
-      
-      // Calculate APR (simplified)
+      // Calculate APR
+      const rewardTokenPrice = 1.0; // Placeholder - replace with actual price
       const weeklyRewards = parseFloat(formatEther(rewardRate)) * 604800; // seconds in a week
-      const usdPerWeek = weeklyRewards * rewardTokenPrice;
-      const weeklyAPR = (usdPerWeek / (tvl > 0 ? tvl : 1)) * 100;
-      const yearlyAPR = weeklyAPR * 52;
+      const weeklyRewardsUsd = weeklyRewards * rewardTokenPrice;
+      
+      // Calculate APR
+      const weeklyApr = tvl > 0 ? (weeklyRewardsUsd / tvl) * 100 : 0;
+      const apr = weeklyApr * 52; // Annual APR
+      
+      // Get fee
+      let fee = 0;
+      try {
+        fee = await poolContract.read.fee() as number;
+        fee = fee / 10000; // Convert from basis points to percentage
+      } catch (error) {
+        console.warn(`Error getting fee for pool ${poolAddress}:`, error);
+      }
+      
+      // Skip slot0 since it's causing issues
+      // Instead, just provide the basic pool information without current tick/price
       
       return {
+        id: poolAddress,
         poolAddress,
         gaugeAddress,
-        symbol,
-        token0: '', // Empty string instead of null
-        token1: '', // Empty string instead of null
+        symbol: clIdentifier,
+        token0: token0Symbol,
+        token1: token1Symbol,
+        token0Address,
+        token1Address,
+        fee: `${fee}%`,
+        tickSpacing,
+        liquidity: formatEther(liquidity),
         tvl,
-        weeklyAPR,
-        yearlyAPR,
-        rewardRate: formatEther(rewardRate),
-        periodFinish: new Date(Number(periodFinish) * 1000).toLocaleDateString(),
-        rewardTokenPrice
+        weeklyRewardsUsd: weeklyRewardsUsd,
+        apr
+        // We're not including currentTick and currentPrice due to slot0 issues
       };
-    } catch (err) {
-      console.error(`Error processing pool at index ${index}:`, err);
+    } catch (error) {
+      console.error(`Error processing CL pool ${poolAddress}:`, error);
       return null;
     }
   };
 
+  const getClIdentifier = (tickSpacing: number, token0: string, token1: string): string => {
+    // This is a simplification - the actual mapping might be different
+    // Based on your screenshot, it seems like:
+    // - CL1: Small tickSpacing
+    // - CL5: Medium tickSpacing
+    // - CL10: Larger tickSpacing
+    // - CL100: Much larger tickSpacing
+    
+    let clPrefix = "CL";
+    
+    if (tickSpacing <= 10) {
+      clPrefix = "CL1";
+    } else if (tickSpacing <= 60) {
+      clPrefix = "CL5";
+    } else if (tickSpacing <= 200) {
+      clPrefix = "CL10";
+    } else {
+      clPrefix = "CL100";
+    }
+    
+    return `${clPrefix}-${token0}/${token1}`;
+  };
+  
   return {
-    getPools,
+    getCLPools,
   };
 };
 
