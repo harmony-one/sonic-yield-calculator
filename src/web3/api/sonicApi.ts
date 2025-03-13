@@ -1,7 +1,6 @@
-// src/services/sonic.ts
 import { getContract, formatEther } from 'viem';
 import { publicClient } from '../client';
-import { Protocol, PoolData } from '../../types';
+import { Protocol, PoolData, PoolBasicInfo } from '../../types';
 import { 
   getContractAddresses, 
   getFlowVoterContract, 
@@ -10,67 +9,114 @@ import {
 import CL_TOKEN_ABI from '../abis/clTokenAbi';
 import CL_GAUGE_ABI from '../abis/clGaugeAbi';
 
-export interface GetPoolsParams {
-  protocol: Protocol;
-  onFailed?: (error: Error) => void;
-}
-
 const sonicApi = () => {
-  const getCLPools = async (protocol: Protocol): Promise<PoolData[]> => {
+  /**
+   * Discover all CL pools in the protocol without processing full details
+   * @param protocol The protocol to query (shadow or equalizer)
+   * @returns Array of basic pool info objects with addresses
+   */
+  const discoverCLPools = async (protocol: Protocol): Promise<PoolBasicInfo[]> => {
     try {
-      const addresses = getContractAddresses(protocol);
       const flowVoterContract = getFlowVoterContract(protocol);
-      const rewardToken = addresses.REWARD_TOKEN;
       
       // Get all gauges first
       console.log("Getting all gauges...");
-      const gaugesResponse = await flowVoterContract.read.getAllGauges() as any[];
-      const allGauges = gaugesResponse.flat();
-      console.log(`Found ${allGauges.length} gauges total`);
+      let allGauges: any[] = [];
       
-      // Filter for CL gauges
+      try {
+        const gaugesResponse = await flowVoterContract.read.getAllGauges() as any[];
+        console.log('FCO::::::::::::: gaugesResponse', gaugesResponse)
+        allGauges = gaugesResponse.flat();
+        console.log(`Found ${allGauges.length} gauges total`);
+      } catch (error) {
+        console.error("Failed to get gauges:", error);
+        return []; // Return empty array if we can't get gauges
+      }
+      
+      // Use a Map to track unique pool addresses and avoid duplicates
+      const uniquePoolsMap = new Map<string, PoolBasicInfo>();
+      
+      // Filter for CL gauges - limiting to at most 100 for performance
       console.log("Filtering for CL gauges...");
-      const clGauges: { gauge: string, pool: string }[] = [];
+      const maxGaugesToCheck = Math.min(allGauges.length, 100);
       
-      for (const gauge of allGauges) {
+      // Process gauges sequentially to avoid overwhelming the RPC
+      for (let i = 0; i < maxGaugesToCheck; i++) {
+        const gauge = allGauges[i];
+        
         try {
-          const isClGauge = await flowVoterContract.read.isClGauge([gauge]) as boolean;
+          // Check if it's a CL gauge
+          let isClGauge = false;
+          try {
+            isClGauge = await flowVoterContract.read.isClGauge([gauge]) as boolean;
+            // console.log('FCO:::::::::::::::::: isClGauge', gauge, isClGauge)
+          } catch (e) {
+            console.warn(`Error checking if gauge ${gauge} is a CL gauge: ${e}`);
+            // Skip this gauge and continue with the next one
+            continue;
+          }
+          
           if (isClGauge) {
-            // Get pool address for the gauge
-            const poolAddress = await flowVoterContract.read.poolForGauge([gauge]) as string;
-            if (poolAddress && poolAddress !== '0x0000000000000000000000000000000000000000') {
-              clGauges.push({ gauge, pool: poolAddress });
+            let poolAddress = '';
+            
+            try {
+              poolAddress = await flowVoterContract.read.poolForGauge([gauge]) as string;
+            } catch (e) {
+              console.warn(`Error getting pool for gauge ${gauge}: ${e}`);
+              continue;
+            }
+            
+            if (poolAddress && 
+                poolAddress !== '0x0000000000000000000000000000000000000000' && 
+                !uniquePoolsMap.has(poolAddress)) {
+              
+              uniquePoolsMap.set(poolAddress, { 
+                poolAddress, 
+                gaugeAddress: gauge 
+              });
+              
+              // Add a small delay to avoid RPC rate limits
+              await new Promise(resolve => setTimeout(resolve, 100));
             }
           }
-        } catch (e) {
-          console.warn(`Error checking gauge ${gauge}:`, e);
+        } catch (gaugeError) {
+          console.warn(`Skipping gauge ${gauge} due to error:`, gaugeError);
+          continue; // Continue to next gauge
         }
       }
       
-      console.log(`Found ${clGauges.length} CL pools with gauges`);
-      
-      // Process each CL pool
-      const clPools: PoolData[] = [];
-      
-      for (const { gauge, pool } of clGauges) {
-        try {
-          const poolData = await processClPool(pool, gauge, rewardToken, protocol);
-          if (poolData) {
-            clPools.push(poolData);
-          }
-        } catch (error) {
-          console.warn(`Error processing CL pool ${pool}:`, error);
-        }
-      }
-      
-      // Sort by TVL (highest first) like in the vfat.tools interface
-      return clPools.sort((a, b) => b.tvl - a.tvl);
+      const result = Array.from(uniquePoolsMap.values());
+      console.log(`Found ${result.length} unique CL pools with gauges`);
+      console.log('FCO::::::::::::::::: result', result)
+      return result;
     } catch (error) {
-      console.error("Error fetching CL pools:", error);
-      return [];
+      console.error("Error discovering CL pools:", error);
+      return []; // Return empty array on error
     }
   };
 
+  /**
+   * Process full details for a specific pool
+   * @param poolInfo Basic pool info with addresses
+   * @param protocol The protocol being queried
+   * @returns Fully processed pool data or null if processing fails
+   */
+  const getPoolDetails = async (
+    poolInfo: PoolBasicInfo,
+    protocol: Protocol
+  ): Promise<PoolData | null> => {
+    const addresses = getContractAddresses(protocol);
+    const rewardToken = addresses.REWARD_TOKEN;
+    
+    try {
+      return await processClPool(poolInfo.poolAddress, poolInfo.gaugeAddress, rewardToken, protocol);
+    } catch (error) {
+      console.error(`Error getting pool details for ${poolInfo.poolAddress}:`, error);
+      return null;
+    }
+  };
+
+  // Process CL pool details
   const processClPool = async (
     poolAddress: string, 
     gaugeAddress: string, 
@@ -93,7 +139,7 @@ const sonicApi = () => {
         client: publicClient
       });
       
-      // Get token addresses
+      // Get token addresses with error handling
       let token0Address = '';
       let token1Address = '';
       let token0Symbol = '';
@@ -123,7 +169,6 @@ const sonicApi = () => {
       }
       
       // Format CL identifier like "CL1-WETH/superOETHb" (from image)
-      // The number after CL seems to be related to tickSpacing
       const clIdentifier = getClIdentifier(tickSpacing, token0Symbol, token1Symbol);
       
       // Get liquidity data
@@ -148,6 +193,7 @@ const sonicApi = () => {
         try {
           rewardRate = await gaugeContract.read.rewardRate([rewardToken]) as bigint;
         } catch (e) {
+          // Fallback if the first method fails
           rewardRate = await gaugeContract.read.rewardRate() as bigint;
         }
       } catch (error) {
@@ -172,9 +218,6 @@ const sonicApi = () => {
         console.warn(`Error getting fee for pool ${poolAddress}:`, error);
       }
       
-      // Skip slot0 since it's causing issues
-      // Instead, just provide the basic pool information without current tick/price
-      
       return {
         id: poolAddress,
         poolAddress,
@@ -188,9 +231,8 @@ const sonicApi = () => {
         tickSpacing,
         liquidity: formatEther(liquidity),
         tvl,
-        weeklyRewardsUsd: weeklyRewardsUsd,
+        weeklyRewardsUsd,
         apr
-        // We're not including currentTick and currentPrice due to slot0 issues
       };
     } catch (error) {
       console.error(`Error processing CL pool ${poolAddress}:`, error);
@@ -199,13 +241,6 @@ const sonicApi = () => {
   };
 
   const getClIdentifier = (tickSpacing: number, token0: string, token1: string): string => {
-    // This is a simplification - the actual mapping might be different
-    // Based on your screenshot, it seems like:
-    // - CL1: Small tickSpacing
-    // - CL5: Medium tickSpacing
-    // - CL10: Larger tickSpacing
-    // - CL100: Much larger tickSpacing
-    
     let clPrefix = "CL";
     
     if (tickSpacing <= 10) {
@@ -221,7 +256,45 @@ const sonicApi = () => {
     return `${clPrefix}-${token0}/${token1}`;
   };
   
+  // Method that processes all pools at once
+  const getCLPools = async (protocol: Protocol): Promise<PoolData[]> => {
+    try {
+      const basicPools = await discoverCLPools(protocol);
+      
+      if (basicPools.length === 0) {
+        console.log("No pools discovered, returning empty array");
+        return [];
+      }
+      
+      // Process pools sequentially to avoid overwhelming the RPC
+      const validPools: PoolData[] = [];
+      
+      for (const poolInfo of basicPools) {
+        try {
+          const poolData = await getPoolDetails(poolInfo, protocol);
+          if (poolData) {
+            validPools.push(poolData);
+          }
+          
+          // Add a small delay between pool processing
+          await new Promise(resolve => setTimeout(resolve, 200));
+        } catch (error) {
+          console.error(`Error processing pool ${poolInfo.poolAddress}:`, error);
+          // Continue with next pool
+        }
+      }
+      
+      // Sort by TVL
+      return validPools.sort((a, b) => b.tvl - a.tvl);
+    } catch (error) {
+      console.error("Error fetching CL pools:", error);
+      return [];
+    }
+  };
+  
   return {
+    discoverCLPools,
+    getPoolDetails,
     getCLPools,
   };
 };

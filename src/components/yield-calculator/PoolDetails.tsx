@@ -1,0 +1,148 @@
+// 📁 components/SonicYieldCalculator/PoolDetails.tsx
+import React from 'react';
+import { ExternalLink } from 'lucide-react';
+import { PoolData } from '../../types';
+import DepositForm, { DepositData } from './DepositForm';
+import { sonic } from '../../web3/chains';
+
+interface PoolDetailsProps {
+  pool: PoolData;
+}
+
+const blockExplorer = sonic.blockExplorers.default.url
+
+const PoolDetails: React.FC<PoolDetailsProps> = ({ pool }) => {
+  const handleDeposit = async (depositData: DepositData) => {
+    console.log('Deposit data:', depositData);
+    // This will be replaced with actual deposit logic
+    alert(`Depositing ${depositData.amount} ${depositData.token} with price range ${depositData.minPrice}-${depositData.maxPrice}`);
+  };
+  
+  // Truncate address for display
+  const truncateAddress = (address: string) => {
+    if (!address) return 'N/A';
+    return `${address.substring(0, 6)}...${address.substring(address.length - 4)}`;
+  };
+
+  return (
+    <div className="pool-details">
+      <div className="pool-details-layout">
+        {/* Left section - Pool details (2 columns) */}
+        <div className="pool-info-section">
+          <div className="pool-info-grid">
+            {/* Column 1 */}
+            <div className="pool-info-column">
+              <div className="detail-group">
+                <h4>Pool</h4>
+                <div className="detail-item">
+                  <span>In Range TVL:</span>
+                  <span>${pool.tvl.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
+                </div>
+                <div className="detail-item">
+                  <span>Weekly Rewards:</span>
+                  <span>${pool.weeklyRewardsUsd.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
+                </div>
+                <div className="detail-item">
+                  <span>APR:</span>
+                  <span>{(pool.apr || 0).toFixed(2)}%</span>
+                </div>
+                <div className="detail-item">
+                  <span>Fee:</span>
+                  <span>{pool.fee}</span>
+                </div>
+              </div>
+              
+              <div className="detail-group">
+                <h4>Token Info</h4>
+                <div className="detail-item">
+                  <span>Token0:</span>
+                  <span>{pool.token0}</span>
+                </div>
+                <div className="detail-item">
+                  <span>Token1:</span>
+                  <span>{pool.token1}</span>
+                </div>
+                <div className="detail-item">
+                  <span>Token0 Address:</span>
+                  <span>{truncateAddress(pool.token0Address)}</span>
+                  <div className="address-with-link">
+                    <a href={`${blockExplorer}address/${pool.token0Address}`} target="_blank" rel="noopener noreferrer">
+                      <ExternalLink size={14} />
+                    </a>
+                  </div>
+                </div>
+                <div className="detail-item">
+                  <span>Token1 Address:</span>
+                  <span>{truncateAddress(pool.token1Address)}</span>
+                  <div className="address-with-link">
+                    <a href={`${blockExplorer}address/${pool.token1Address}`} target="_blank" rel="noopener noreferrer">
+                      <ExternalLink size={14} />
+                    </a>
+                  </div>
+                </div>
+              </div>
+            </div>
+            
+            {/* Column 2 */}
+            <div className="pool-info-column">
+              <div className="detail-group">
+                <h4>Contract Info</h4>
+                <div className="detail-item">
+                  <span>Pool Address:</span>
+                  <div className="address-with-link">
+                    <span>{truncateAddress(pool.poolAddress)}</span>
+                    <a href={`${blockExplorer}address/${pool.poolAddress}`} target="_blank" rel="noopener noreferrer">
+                      <ExternalLink size={14} />
+                    </a>
+                  </div>
+                </div>
+                <div className="detail-item">
+                  <span>Gauge Address:</span>
+                  <div className="address-with-link">
+                    <span>{truncateAddress(pool.gaugeAddress)}</span>
+                    <a href={`${blockExplorer}address/${pool.gaugeAddress}`} target="_blank" rel="noopener noreferrer">
+                      <ExternalLink size={14} />
+                    </a>
+                  </div>
+                </div>
+                <div className="detail-item">
+                  <span>Tick Spacing:</span>
+                  <span>{pool.tickSpacing}</span>
+                </div>
+                <div className="detail-item">
+                  <span>Liquidity:</span>
+                  <span>{parseFloat(pool.liquidity).toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
+                </div>
+              </div>
+              
+              {(pool.currentTick !== undefined || pool.currentPrice !== undefined) && (
+                <div className="detail-group">
+                  <h4>Current State</h4>
+                  {pool.currentTick !== undefined && (
+                    <div className="detail-item">
+                      <span>Current Tick:</span>
+                      <span>{pool.currentTick}</span>
+                    </div>
+                  )}
+                  {pool.currentPrice !== undefined && (
+                    <div className="detail-item">
+                      <span>Current Price:</span>
+                      <span>{pool.currentPrice}</span>
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+        
+        {/* Right section - Deposit form */}
+        <div className="deposit-form-section">
+          <DepositForm pool={pool} onDeposit={handleDeposit} />
+        </div>
+      </div>
+    </div>
+  );
+};
+
+export default PoolDetails;

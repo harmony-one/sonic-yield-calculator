@@ -22,7 +22,9 @@ export const getContractAddresses = (protocol: Protocol) => {
         V2_FACTORY_ADDRESS: config.shadow.V2_FACTORY_ADDRESS,
         CL_FACTORY_ADDRESS: config.shadow.CL_FACTORY_ADDRESS,
         REWARD_TOKEN: config.shadow.REWARD_TOKEN, 
-        REWARD_TOKEN_2: config.shadow.REWARD_TOKEN_2
+        REWARD_TOKEN_2: config.shadow.REWARD_TOKEN_2,
+        NFT_TOKEN_ADDRESS: config.shadow.NFT_TOKEN_ADDRESS,
+        NFT_FARM_STRATEGY_ADDRESS: config.shadow.NFT_FARM_STRATEGY_ADDRESS,
       };
   };
 

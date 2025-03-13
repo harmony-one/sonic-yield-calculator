@@ -9,6 +9,11 @@ export type SortOption = 'symbol' | 'tvl' | 'weeklyAPR' | 'yearlyAPR';
 // Sort direction
 export type SortDirection = 'asc' | 'desc';
 
+export interface PoolBasicInfo {
+  poolAddress: string;
+  gaugeAddress: string;
+}
+
 // Pool data structure
 export interface PoolData {
   id: string;
@@ -46,4 +51,14 @@ export interface GetPoolsOptions {
 // Sonic API interface
 export interface SonicApi {
   getPools: (options: GetPoolsOptions) => Promise<PoolData[]>;
+}
+
+export interface DepositData {
+  token: string;
+  amount: string;
+  minPrice: number;
+  maxPrice: number;
+  slippage: number;
+  autoRebalance: boolean;
+  autoRewards: boolean;
 }

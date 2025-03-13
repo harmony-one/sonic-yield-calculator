@@ -1,61 +1,148 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { RefreshCw, Download, ChevronUp, ChevronDown, ChevronLeft, ChevronRight, ExternalLink } from 'lucide-react';
-import { useSonicPools } from '../../hooks/useSonicPools';
-import { PoolData, Protocol } from '../../types';
-import "./SonicYieldCalculator.styles.scss";
+// 📁 components/SonicYieldCalculator/index.tsx
+// Main component that orchestrates everything
 
-const POOLS_PER_PAGE = 10; // Number of pools to display per page
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import { PoolData, Protocol } from '../../types';
+import sonicApi from '../../web3/api/sonicApi';
+
+import Toolbar from './Toolbar'
+import PoolTable from './PoolTable'
+// import StatusBar from './StatusBar';
+
+import './SonicYieldCalculator.styles.scss';
+import { AlertTriangle, Loader } from 'lucide-react';
+
+// Small batch size to prevent RPC overload
+const BATCH_SIZE = 3;
+// Delay between processing batches to avoid overwhelming the RPC
+const BATCH_DELAY = 1000;
 
 const SonicYieldCalculator: React.FC = () => {
+  // State management
   const [activeProtocol, setActiveProtocol] = useState<Protocol>('shadow');
   const [minTVL, setMinTVL] = useState<number>(10000);
   const [sortBy, setSortBy] = useState<keyof PoolData>('apr');
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
   const [favorites, setFavorites] = useState<string[]>([]);
   const [showOnlyFavorites, setShowOnlyFavorites] = useState<boolean>(false);
-  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [searchTerm, setSearchTerm] = useState<string>('');
   const [expandedPoolId, setExpandedPoolId] = useState<string | null>(null);
   
-  // Using the hook with auto-fetch set to true
-  const { pools, isLoading, error, fetchPools } = useSonicPools({ 
-    protocol: activeProtocol,
-    autoFetch: true 
-  });
-
-  const handleSort = (column: keyof PoolData) => {
-    if (sortBy === column) {
-      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
-    } else {
-      setSortBy(column);
-      setSortDirection('desc');
-    }
-    setCurrentPage(1); // Reset to first page on sort change
-  };
-
-  const toggleFavorite = (poolAddress: string, event: React.MouseEvent) => {
-    // Prevent clicking the star from also toggling row expansion
-    event.stopPropagation();
-    
-    if (favorites.includes(poolAddress)) {
-      setFavorites(favorites.filter(addr => addr !== poolAddress));
-    } else {
-      setFavorites([...favorites, poolAddress]);
-    }
-  };
+  // State for progressive loading
+  const [isLoading, setIsLoading] = useState(true);
+  const [poolsMap, setPoolsMap] = useState<Map<string, PoolData>>(new Map());
+  const [processedCount, setProcessedCount] = useState(0);
+  const [totalPools, setTotalPools] = useState(0);
+  const [error, setError] = useState<Error | null>(null);
+  const [statusMessage, setStatusMessage] = useState("Initializing...");
   
-  const togglePoolExpanded = (poolId: string) => {
-    if (expandedPoolId === poolId) {
-      setExpandedPoolId(null);
-    } else {
-      setExpandedPoolId(poolId);
+  // Refs to track the API instance and current state
+  const apiRef = useRef(sonicApi());
+  const isMounted = useRef(true);
+  const isLoadingRef = useRef(false);
+
+  // Convert Map to array only when needed for rendering
+  const pools = Array.from(poolsMap.values());
+  
+  // Load data with a controlled approach
+  const loadData = useCallback(async () => {
+    if (isLoadingRef.current) return;
+    
+    try {
+      isLoadingRef.current = true;
+      setIsLoading(true);
+      setError(null);
+      setPoolsMap(new Map());
+      setProcessedCount(0);
+      setTotalPools(0);
+      setStatusMessage("Discovering pools...");
+      
+      // Step 1: Discover pools
+      const basicPools = await apiRef.current.discoverCLPools(activeProtocol);
+      if (!isMounted.current) return;
+      
+      setTotalPools(basicPools.length);
+      
+      if (basicPools.length === 0) {
+        setStatusMessage("No pools found. There might be an issue with the RPC connection.");
+        setIsLoading(false);
+        isLoadingRef.current = false;
+        return;
+      }
+      
+      setStatusMessage(`Found ${basicPools.length} pools. Loading details...`);
+      
+      // Step 2: Process pools in small batches
+      const totalBatches = Math.ceil(basicPools.length / BATCH_SIZE);
+      
+      for (let batch = 0; batch < totalBatches; batch++) {
+        if (!isMounted.current) break;
+        
+        const start = batch * BATCH_SIZE;
+        const end = Math.min(start + BATCH_SIZE, basicPools.length);
+        const currentBatch = basicPools.slice(start, end);
+        
+        setStatusMessage(`Loading pools ${start + 1} to ${end} of ${basicPools.length}...`);
+        
+        // Process each pool in the batch
+        for (const poolInfo of currentBatch) {
+          try {
+            if (!isMounted.current) break;
+            
+            const poolData = await apiRef.current.getPoolDetails(poolInfo, activeProtocol);
+            
+            if (poolData) {
+              setPoolsMap(prev => {
+                const newMap = new Map(prev);
+                newMap.set(poolData.poolAddress, poolData);
+                return newMap;
+              });
+            }
+            
+            setProcessedCount(prevCount => prevCount + 1);
+          } catch (e) {
+            console.error(`Error processing pool ${poolInfo.poolAddress}:`, e);
+          }
+          
+          // Small delay between pools to avoid overwhelming the RPC
+          await new Promise(resolve => setTimeout(resolve, 300));
+        }
+        
+        // Delay between batches
+        if (batch < totalBatches - 1) {
+          await new Promise(resolve => setTimeout(resolve, BATCH_DELAY));
+        }
+      }
+      
+      setStatusMessage("Finished loading pool details.");
+    } catch (e) {
+      if (isMounted.current) {
+        console.error("Error loading data:", e);
+        setError(e instanceof Error ? e : new Error('Unknown error occurred'));
+        setStatusMessage("Error loading data. Please try again.");
+      }
+    } finally {
+      if (isMounted.current) {
+        setIsLoading(false);
+        isLoadingRef.current = false;
+      }
     }
-  };
+  }, [activeProtocol]);
 
   // Filter and sort pools
-  const getFilteredAndSortedPools = useCallback(() => {
+  const filteredAndSortedPools = React.useMemo(() => {
     return [...pools]
       .filter(pool => pool.tvl >= minTVL)
       .filter(pool => !showOnlyFavorites || favorites.includes(pool.poolAddress))
+      .filter(pool => {
+        if (!searchTerm) return true;
+        const searchLower = searchTerm.toLowerCase();
+        return (
+          pool.symbol.toLowerCase().includes(searchLower) ||
+          pool.token0.toLowerCase().includes(searchLower) ||
+          pool.token1.toLowerCase().includes(searchLower)
+        );
+      })
       .sort((a, b) => {
         let comparison = 0;
         
@@ -78,40 +165,49 @@ const SonicYieldCalculator: React.FC = () => {
         
         return sortDirection === 'asc' ? comparison : -comparison;
       });
-  }, [pools, minTVL, showOnlyFavorites, favorites, sortBy, sortDirection]);
+  }, [pools, minTVL, showOnlyFavorites, favorites, sortBy, sortDirection, searchTerm]);
 
-  const filteredAndSortedPools = getFilteredAndSortedPools();
-  
-  // Calculate total number of pages
-  const totalPages = Math.ceil(filteredAndSortedPools.length / POOLS_PER_PAGE);
-  
-  // Reset to first page when filters change
+  // Component mount/unmount
   useEffect(() => {
-    setCurrentPage(1);
-  }, [minTVL, showOnlyFavorites, activeProtocol]);
-  
-  // Get current page's pools
-  const getCurrentPagePools = () => {
-    const startIndex = (currentPage - 1) * POOLS_PER_PAGE;
-    const endIndex = startIndex + POOLS_PER_PAGE;
-    return filteredAndSortedPools.slice(startIndex, endIndex);
-  };
+    isMounted.current = true;
+    loadData();
+    
+    return () => {
+      isMounted.current = false;
+    };
+  }, [loadData]);
 
-  const currentPools = getCurrentPagePools();
-  
-  // Pagination controls
-  const goToNextPage = () => {
-    if (currentPage < totalPages) {
-      setCurrentPage(currentPage + 1);
+  // Handle sort
+  const handleSort = (column: keyof PoolData) => {
+    if (sortBy === column) {
+      setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+    } else {
+      setSortBy(column);
+      setSortDirection('desc');
     }
   };
 
-  const goToPrevPage = () => {
-    if (currentPage > 1) {
-      setCurrentPage(currentPage - 1);
+  // Toggle favorite
+  const toggleFavorite = (poolAddress: string, event: React.MouseEvent) => {
+    event.stopPropagation();
+    
+    if (favorites.includes(poolAddress)) {
+      setFavorites(favorites.filter(addr => addr !== poolAddress));
+    } else {
+      setFavorites([...favorites, poolAddress]);
+    }
+  };
+  
+  // Toggle expanded row
+  const togglePoolExpanded = (poolId: string) => {
+    if (expandedPoolId === poolId) {
+      setExpandedPoolId(null);
+    } else {
+      setExpandedPoolId(poolId);
     }
   };
 
+  // Handle export
   const handleExport = () => {
     const headers = ['Pool', 'TVL', 'Weekly Rewards', 'APR', 'Fee'];
     const rows = filteredAndSortedPools.map(pool => [
@@ -138,304 +234,80 @@ const SonicYieldCalculator: React.FC = () => {
     URL.revokeObjectURL(url);
   };
 
-  // Render column header with sort indicator
-  const renderColumnHeader = (label: string, column: keyof PoolData, className: string = '') => {
-    return (
-      <th 
-        className={className}
-        onClick={() => handleSort(column)}
-      >
-        <div className="th-content">
-          {label}
-          {sortBy === column && (
-            <span className="sort-indicator">
-              {sortDirection === 'asc' ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-            </span>
-          )}
-        </div>
-      </th>
-    );
-  };
-
-  // Truncate address for display
-  const truncateAddress = (address: string) => {
-    if (!address) return 'N/A';
-    return `${address.substring(0, 6)}...${address.substring(address.length - 4)}`;
-  };
-
-  // Format a value for display
-  const formatValue = (value: any): string => {
-    if (value === undefined || value === null) return 'N/A';
-    if (typeof value === 'number') {
-      if (value > 1000) return `$${value.toLocaleString(undefined, { maximumFractionDigits: 2 })}`;
-      return value.toString();
-    }
-    return value.toString();
-  };
-
   return (
     <div className="sonic-yield-calculator">
-      {/* Simple toolbar */}
-      <div className="toolbar">
-        <div className="protocol-selector">
-          <button 
-            className={activeProtocol === 'shadow' ? 'active' : ''} 
-            onClick={() => setActiveProtocol('shadow')}
-          >
-            Shadow
-          </button>
-          <button 
-            className={activeProtocol === 'equalizer' ? 'active' : ''} 
-            disabled={true}
-            onClick={() => setActiveProtocol('equalizer')}
-          >
-            Equalizer
-          </button>
-        </div>
-        
-        <div className="filters">
-          <label>
-            Min TVL: $
-            <input 
-              type="number" 
-              value={minTVL} 
-              onChange={(e) => setMinTVL(Number(e.target.value))} 
-            />
-          </label>
-          
-          <label>
-            <input 
-              type="checkbox" 
-              checked={showOnlyFavorites}
-              onChange={() => setShowOnlyFavorites(!showOnlyFavorites)}
-            />
-            Favorites Only
-          </label>
-        </div>
-        
-        <div className="toolbar-actions">
-          <button 
-            title="Export Data"
-            onClick={handleExport}
-          >
-            <Download size={18} />
-          </button>
-          
-          <button 
-            title="Refresh Data"
-            onClick={() => fetchPools()}
-            className={isLoading ? 'animate-spin' : ''}
-          >
-            <RefreshCw size={18} />
-          </button>
-        </div>
-      </div>
+      <Toolbar 
+        activeProtocol={activeProtocol}
+        setActiveProtocol={setActiveProtocol}
+        minTVL={minTVL}
+        setMinTVL={setMinTVL}
+        showOnlyFavorites={showOnlyFavorites}
+        setShowOnlyFavorites={setShowOnlyFavorites}
+        searchTerm={searchTerm}
+        setSearchTerm={setSearchTerm}
+        isLoading={isLoading}
+        handleRefresh={loadData}
+        handleExport={handleExport}
+        pools={pools}
+      />
       
-      {/* Loading indicator */}
       {isLoading && (
-        <div className="status-indicator">
-          Loading pool data... {pools.length > 0 ? `(${pools.length} pools loaded so far)` : ''}
+        <div className="loading-status">
+        <div className="spinner">
+          <Loader size={20} className="animate-spin" />
         </div>
+        <span>{statusMessage}</span>
+        {totalPools > 0 && (
+          <div className="progress-container">
+            <div className="progress-bar">
+              <div 
+                className="progress-fill" 
+                style={{ width: `${(processedCount / totalPools) * 100}%` }}
+              />
+            </div>
+            <div className="progress-text">
+              {processedCount} of {totalPools} pools processed
+            </div>
+          </div>
+        )}
+      </div>
       )}
       
-      {/* Spreadsheet */}
+      {error && !isLoading && (
+          <div className="error-message">
+            <AlertTriangle size={18} />
+            <span>{error.message}</span>
+            <button onClick={loadData}>Try Again</button>
+          </div>
+      )}
+      
       <div className="spreadsheet-container">
-        <table>
-          <thead>
-            <tr>
-              <th style={{ width: '40px' }}></th>
-              {renderColumnHeader('Asset', 'symbol')}
-              {renderColumnHeader('TVL', 'tvl', 'number')}
-              {renderColumnHeader('Weekly Rewards', 'weeklyRewardsUsd', 'number')}
-              {renderColumnHeader('APR', 'apr', 'number')}
-              <th className="number">Fee</th>
-            </tr>
-          </thead>
-          <tbody>
-            {error ? (
-              <tr>
-                <td colSpan={6} className="error">
-                  {error.message || "An error occurred"}
-                </td>
-              </tr>
-            ) : pools.length === 0 && isLoading ? (
-              <tr>
-                <td colSpan={6} className="loading">
-                  Fetching initial pool data...
-                </td>
-              </tr>
-            ) : filteredAndSortedPools.length === 0 ? (
-              <tr>
-                <td colSpan={6} className="no-pools">
-                  No pools found matching criteria
-                </td>
-              </tr>
-            ) : (
-              currentPools.map((pool) => (
-                <React.Fragment key={pool.poolAddress}>
-                  <tr 
-                    onClick={() => togglePoolExpanded(pool.poolAddress)}
-                    className={`clickable-row ${expandedPoolId === pool.poolAddress ? 'expanded' : ''}`}
-                  >
-                    <td>
-                      <button 
-                        onClick={(e) => toggleFavorite(pool.poolAddress, e)}
-                        style={{ 
-                          background: 'none', 
-                          border: 'none', 
-                          cursor: 'pointer',
-                          fontSize: '18px'
-                        }}
-                      >
-                        {favorites.includes(pool.poolAddress) ? '★' : '☆'}
-                      </button>
-                    </td>
-                    <td>{pool.symbol}</td>
-                    <td className="number">${pool.tvl.toLocaleString(undefined, { maximumFractionDigits: 2 })}</td>
-                    <td className="number">${pool.weeklyRewardsUsd.toLocaleString(undefined, { maximumFractionDigits: 2 })}</td>
-                    <td className="number">{(pool.apr || 0).toFixed(2)}%</td>
-                    <td className="number">{pool.fee}</td>
-                  </tr>
-                  {expandedPoolId === pool.poolAddress && (
-                    <tr className="pool-details-row">
-                      <td colSpan={6}>
-                        <div className="pool-details">
-                          <div className="pool-details-grid">
-                            <div className="detail-group">
-                              <h4>Pool</h4>
-                              <div className="detail-item">
-                                <span>In Range TVL:</span>
-                                <span>${pool.tvl.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
-                              </div>
-                              <div className="detail-item">
-                                <span>Weekly Rewards:</span>
-                                <span>${pool.weeklyRewardsUsd.toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
-                              </div>
-                              <div className="detail-item">
-                                <span>APR:</span>
-                                <span>{(pool.apr || 0).toFixed(2)}%</span>
-                              </div>
-                              <div className="detail-item">
-                                <span>Fee:</span>
-                                <span>{pool.fee}</span>
-                              </div>
-                            </div>
-                            
-                            <div className="detail-group">
-                              <h4>Token Info</h4>
-                              <div className="detail-item">
-                                <span>Token0:</span>
-                                <span>{pool.token0}</span>
-                              </div>
-                              <div className="detail-item">
-                                <span>Token1:</span>
-                                <span>{pool.token1}</span>
-                              </div>
-                              <div className="detail-item">
-                                <span>Token0 Address:</span>
-                                <span>{truncateAddress(pool.token0Address)}</span>
-                              </div>
-                              <div className="detail-item">
-                                <span>Token1 Address:</span>
-                                <span>{truncateAddress(pool.token1Address)}</span>
-                              </div>
-                            </div>
-                            
-                            <div className="detail-group">
-                              <h4>Contract Info</h4>
-                              <div className="detail-item">
-                                <span>Pool Address:</span>
-                                <div className="address-with-link">
-                                  <span>{truncateAddress(pool.poolAddress)}</span>
-                                  <a href={`https://explorer.sonic.com/address/${pool.poolAddress}`} target="_blank" rel="noopener noreferrer">
-                                    <ExternalLink size={14} />
-                                  </a>
-                                </div>
-                              </div>
-                              <div className="detail-item">
-                                <span>Gauge Address:</span>
-                                <div className="address-with-link">
-                                  <span>{truncateAddress(pool.gaugeAddress)}</span>
-                                  <a href={`https://explorer.sonic.com/address/${pool.gaugeAddress}`} target="_blank" rel="noopener noreferrer">
-                                    <ExternalLink size={14} />
-                                  </a>
-                                </div>
-                              </div>
-                              <div className="detail-item">
-                                <span>Tick Spacing:</span>
-                                <span>{pool.tickSpacing}</span>
-                              </div>
-                              <div className="detail-item">
-                                <span>Liquidity:</span>
-                                <span>{parseFloat(pool.liquidity).toLocaleString(undefined, { maximumFractionDigits: 2 })}</span>
-                              </div>
-                            </div>
-                            
-                            {(pool.currentTick !== undefined || pool.currentPrice !== undefined) && (
-                              <div className="detail-group">
-                                <h4>Current State</h4>
-                                {pool.currentTick !== undefined && (
-                                  <div className="detail-item">
-                                    <span>Current Tick:</span>
-                                    <span>{pool.currentTick}</span>
-                                  </div>
-                                )}
-                                {pool.currentPrice !== undefined && (
-                                  <div className="detail-item">
-                                    <span>Current Price:</span>
-                                    <span>{formatValue(pool.currentPrice)}</span>
-                                  </div>
-                                )}
-                              </div>
-                            )}
-                          </div>
-                        </div>
-                      </td>
-                    </tr>
-                  )}
-                </React.Fragment>
-              ))
-            )}
-          </tbody>
-        </table>
+        <PoolTable 
+          pools={filteredAndSortedPools}
+          isLoading={isLoading}
+          error={error}
+          statusMessage={statusMessage}
+          sortBy={sortBy}
+          sortDirection={sortDirection}
+          handleSort={handleSort}
+          expandedPoolId={expandedPoolId}
+          togglePoolExpanded={togglePoolExpanded}
+          favorites={favorites}
+          toggleFavorite={toggleFavorite}
+        />
       </div>
-      
-      {/* Pagination controls */}
-      {filteredAndSortedPools.length > 0 && (
-        <div className="pagination-controls">
-          <button 
-            onClick={goToPrevPage} 
-            disabled={currentPage === 1}
-            className="pagination-button"
-          >
-            <ChevronLeft size={16} />
-            Previous
-          </button>
-          
-          <span className="pagination-info">
-            Page {currentPage} of {totalPages}
-          </span>
-          
-          <button 
-            onClick={goToNextPage} 
-            disabled={currentPage === totalPages}
-            className="pagination-button"
-          >
-            Next
-            <ChevronRight size={16} />
-          </button>
-        </div>
-      )}
-      
-      {/* Status bar */}
       <div className="status-bar">
-        <div>
-          Showing {currentPools.length} of {filteredAndSortedPools.length} pools • {activeProtocol.charAt(0).toUpperCase() + activeProtocol.slice(1)} protocol
-        </div>
-        <div>
-          Min TVL: ${minTVL.toLocaleString()} • Sort: {sortBy.charAt(0).toUpperCase() + sortBy.slice(1)} ({sortDirection === 'asc' ? 'Ascending' : 'Descending'})
-        </div>
+      <div>
+        Showing {filteredAndSortedPools.length} of {pools.length} pools • 
+        {activeProtocol.charAt(0).toUpperCase() + activeProtocol.slice(1)} protocol
+        {totalPools > 0 && ` • ${processedCount} of ${totalPools} pools processed`}
       </div>
+      <div>
+        Min TVL: ${minTVL.toLocaleString()} 
+        {searchTerm && ` • Search: "${searchTerm}"`} 
+        • Sort: {sortBy.charAt(0).toUpperCase() + sortBy.slice(1)} ({sortDirection === 'asc' ? 'Ascending' : 'Descending'})
+      </div>
+    </div>
     </div>
   );
 };

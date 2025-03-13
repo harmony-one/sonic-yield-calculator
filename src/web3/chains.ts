@@ -21,7 +21,7 @@ export const sonic = defineChain({
     },
   },
   blockExplorers: {
-    default: { name: 'Explorer', url: 'https://explorer.sonic.io' },
+    default: { name: 'Explorer', url: 'https://sonicscan.org/' },
   },
 });
 

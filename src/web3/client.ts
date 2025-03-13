@@ -1,5 +1,5 @@
 import { createPublicClient, http } from "viem";
-import { sonic } from "./chain";
+import { sonic } from "./chains";
 import config from "../config";
 
 export const publicClient = createPublicClient({
