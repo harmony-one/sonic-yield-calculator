@@ -1,0 +1,430 @@
+.deposit-form-container {
+  // background-color: #1e1e1e; // Dark background
+  border-radius: 8px;
+  padding: 1.25rem;
+  width: 100%;
+  max-width: 22rem;
+  box-sizing: border-box;
+  color: #1b1b1b;
+  
+  .deposit-form-title {
+    margin: 0 0 1rem;
+    font-size: 1.125rem;
+    font-weight: 600;
+    // color: #ffffff;
+  }
+  
+  .deposit-form {
+    .form-section {
+      margin-bottom: 1rem;
+    }
+    
+    .form-label {
+      display: block;
+      font-size: 0.875rem;
+      font-weight: 500;
+      margin-bottom: 0.2rem;
+      // color: #bfbfbf;
+    }
+    
+    .sub-label {
+      font-size: 0.75rem;
+      color: #999999;
+    }
+    
+    .balance-label {
+      font-size: 0.75rem;
+      margin-bottom: 0.2rem;
+      color: #bfbfbf;
+    }
+    
+    .form-input {
+      width: 100%;
+      padding: 0.625rem;
+      // background-color: #2a2a2a;
+      border: 1px solid #232020;
+      border-radius: 6px;
+      font-size: 0.875rem;
+      color: #f1f1f1;
+      
+      &:focus {
+        outline: none;
+        border-color: #6366f1;
+      }
+    }
+    
+    .token-selector {
+      display: flex;
+      gap: 0.5rem;
+      
+      .token-button {
+        flex: 1;
+        padding: 0.75rem;
+        background-color: #7d7d7d;
+        border: 1px solid #3a3a3a;
+        border-radius: 6px;
+        font-size: 0.875rem;
+        cursor: pointer;
+        color: #f1f1f1;
+        
+        &.active {
+          background-color: #6366f1;
+          color: white;
+          border-color: #6366f1;
+        }
+        
+        &:hover:not(.active) {
+          color: white;
+          background-color: #7d7d7d;
+        }
+      }
+    }
+    
+    .price-view-selector {
+      margin-bottom: 0.2rem;
+      
+      .token-button {
+        font-size: 0.8125rem;
+      }
+    }
+    
+    .input-with-button {
+      display: flex;
+      
+      .form-input {
+        flex: 1;
+        border-top-right-radius: 0;
+        border-bottom-right-radius: 0;
+      }
+      
+      .max-button {
+        padding: 0 0.75rem;
+        background-color: #7d7d7d;
+        border: 1px solid #3a3a3a;
+        border-left: none;
+        border-radius: 0 6px 6px 0;
+        font-size: 0.75rem;
+        cursor: pointer;
+        color: #f1f1f1;
+        
+        &:hover {
+          background-color: #444444;
+        }
+      }
+    }
+    
+    .price-inputs {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1rem;
+      
+      @media (max-width: 640px) {
+        grid-template-columns: 1fr;
+        gap: 0.75rem;
+      }
+      
+      .price-input-group {
+       // padding: 0.3rem;
+
+        .form-input {
+          margin-bottom: 0.5rem;
+          color: black;
+        }
+        
+        .price-adjust-buttons {
+          display: flex;
+          gap: 0.5rem;
+          
+          .adjust-button {
+            flex: 1;
+            padding: 0.25rem 0;
+            background-color: #7d7d7d;
+            border: 1px solid #3a3a3a;
+            border-radius: 4px;
+            font-size: 1rem;
+            cursor: pointer;
+            color: #f1f1f1;
+            
+            &:hover {
+              background-color: #444444;
+            }
+          }
+        }
+      }
+    }
+    
+    .current-price {
+      text-align: center;
+      font-size: 1rem;
+      padding: 0.75rem 0;
+      margin: 0.75rem 0;
+      //  background-color: #2a2a2a;
+      border-radius: 6px;
+      color: #1b1b1b;
+    }
+    
+    .position-stats {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.875rem;
+      margin: 0.75rem 0 1.25rem;
+      padding: 0.5rem 0.75rem;
+      // background-color: #2a2a2a;
+      border-radius: 6px;
+      color: #1b1b1b;
+    }
+    
+    .toggle-option {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0.5rem 0;
+      
+      .toggle-label {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        font-size: 0.875rem;
+        
+        .icon {
+          color: #bfbfbf;
+        }
+      }
+      
+      input[type="checkbox"] {
+        appearance: none;
+        width: 3rem;
+        height: 1.5rem;
+        background-color: #878787;
+        border-radius: 1rem;
+        position: relative;
+        cursor: pointer;
+        
+        &:checked {
+          background-color: #6366f1;
+        }
+        
+        &:before {
+          content: "";
+          position: absolute;
+          width: 1.125rem;
+          height: 1.125rem;
+          border-radius: 50%;
+          top: 0.1875rem;
+          left: 0.1875rem;
+          background-color: #f1f1f1;
+          transition: transform 0.3s;
+        }
+        
+        &:checked:before {
+          transform: translateX(1.5rem);
+        }
+      }
+    }
+    
+    .slippage-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      
+      .help-link {
+        font-size: 0.75rem;
+        color: #7c83ff;
+        cursor: pointer;
+      }
+    }
+    
+    .slippage-presets {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr;
+      gap: 0.5rem;
+      margin-top: 0.5rem;
+      
+      .preset-button {
+        padding: 0.5rem;
+        background-color: #7e7e7e;
+        border: 1px solid #3a3a3a;
+        border-radius: 4px;
+        font-size: 0.75rem;
+        cursor: pointer;
+        color: #f1f1f1;
+        
+        &.active {
+          background-color: #6366f1;
+          color: white;
+          border-color: #6366f1;
+        }
+        
+        &:hover:not(.active) {
+          background-color: #444444;
+        }
+      }
+    }
+    
+    .deposit-button {
+      display: flex;
+      width: 100%;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      margin-top: 1.5rem;
+      padding: 0.75rem;
+      background-color: #6366f1;
+      border: none;
+      border-radius: 6px;
+      font-size: 1rem;
+      font-weight: 500;
+      cursor: pointer;
+      color: white;
+      transition: background-color 0.2s;
+      
+      &:hover:not(:disabled) {
+        background-color: #4f46e5;
+      }
+      
+      &:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+      }
+    }
+    
+    .error-message {
+      margin-top: 1rem;
+      padding: 0.75rem;
+      background-color: rgba(239, 68, 68, 0.1);
+      border: 1px solid rgba(239, 68, 68, 0.2);
+      border-radius: 6px;
+      color: #ef4444;
+      font-size: 0.875rem;
+    }
+  }
+}
+
+// For dropdown token selection similar to vfat.io
+.token-dropdown {
+  position: relative;
+  
+  .token-dropdown-button {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.625rem 1rem;
+    background-color: #2a2a2a;
+    border: 1px solid #3a3a3a;
+    border-radius: 6px;
+    font-size: 0.875rem;
+    cursor: pointer;
+    color: #f1f1f1;
+    width: 100%;
+    justify-content: space-between;
+    
+    .token-button-content {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    
+    .token-icon {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      width: 1.5rem;
+      height: 1.5rem;
+      border-radius: 50%;
+      background-color: #3a3a3a;
+      font-weight: 500;
+    }
+    
+    .dropdown-arrow {
+      transition: transform 0.2s;
+    }
+  }
+  
+  .token-dropdown-menu {
+    position: absolute;
+    top: calc(100% + 0.5rem);
+    left: 0;
+    width: 100%;
+    max-height: 15rem;
+    overflow-y: auto;
+    background-color: #2a2a2a;
+    border: 1px solid #3a3a3a;
+    border-radius: 6px;
+    z-index: 100;
+    box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
+    
+    .search-input {
+      padding: 0.75rem;
+      border-bottom: 1px solid #3a3a3a;
+      
+      .search-input-wrapper {
+        position: relative;
+        display: flex;
+        align-items: center;
+        
+        svg {
+          position: absolute;
+          left: 0.5rem;
+          color: #6b7280;
+        }
+        
+        input {
+          width: 100%;
+          padding: 0.5rem 0.5rem 0.5rem 2rem;
+          background-color: #333333;
+          border: 1px solid #3a3a3a;
+          border-radius: 4px;
+          font-size: 0.875rem;
+          color: #f1f1f1;
+          
+          &:focus {
+            outline: none;
+            border-color: #6366f1;
+          }
+          
+          &::placeholder {
+            color: #6b7280;
+          }
+        }
+      }
+    }
+    
+    .token-list {
+      padding: 0.5rem 0;
+      
+      .token-item {
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+        padding: 0.75rem 0.75rem;
+        cursor: pointer;
+        
+        &:hover {
+          background-color: #333333;
+        }
+        
+        .token-icon {
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          width: 1.5rem;
+          height: 1.5rem;
+          border-radius: 50%;
+          background-color: #3a3a3a;
+          font-weight: 500;
+        }
+        
+        .token-name {
+          font-size: 0.875rem;
+          color: #f1f1f1;
+        }
+        
+        .token-balance {
+          margin-left: auto;
+          font-size: 0.75rem;
+          color: #bfbfbf;
+        }
+      }
+    }
+  }
+}

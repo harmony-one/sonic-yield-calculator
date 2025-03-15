@@ -1,10 +1,9 @@
 // 📁 components/SonicYieldCalculator/PoolDetails.tsx
-import React from 'react';
+import React, { useState } from 'react';
 import { ExternalLink } from 'lucide-react';
 import { PoolData } from '../../types';
-import DepositForm, { DepositData } from './DepositForm';
+import DepositForm from '../deposit-form/DepositForm';
 import { sonic } from '../../web3/chains';
-
 interface PoolDetailsProps {
   pool: PoolData;
 }
@@ -12,12 +11,14 @@ interface PoolDetailsProps {
 const blockExplorer = sonic.blockExplorers.default.url
 
 const PoolDetails: React.FC<PoolDetailsProps> = ({ pool }) => {
-  const handleDeposit = async (depositData: DepositData) => {
-    console.log('Deposit data:', depositData);
-    // This will be replaced with actual deposit logic
-    alert(`Depositing ${depositData.amount} ${depositData.token} with price range ${depositData.minPrice}-${depositData.maxPrice}`);
+  const [txHash, setTxHash] = useState<string | null>(null);
+  const [nftId, setNftId] = useState<number | null>(null);
+
+  const handleSuccess = (hash: string, id?: number) => {
+    setTxHash(hash);
+    if (id) setNftId(id);
   };
-  
+
   // Truncate address for display
   const truncateAddress = (address: string) => {
     if (!address) return 'N/A';
@@ -26,6 +27,13 @@ const PoolDetails: React.FC<PoolDetailsProps> = ({ pool }) => {
 
   return (
     <div className="pool-details">
+      {txHash && (
+        <div className="success-message">
+          <p>Deposit successful!</p>
+          <p>Transaction: {txHash.substring(0, 10)}...{txHash.substring(txHash.length - 8)}</p>
+          {nftId && <p>NFT ID: {nftId}</p>}
+        </div>
+      )}
       <div className="pool-details-layout">
         {/* Left section - Pool details (2 columns) */}
         <div className="pool-info-section">
@@ -138,7 +146,10 @@ const PoolDetails: React.FC<PoolDetailsProps> = ({ pool }) => {
         
         {/* Right section - Deposit form */}
         <div className="deposit-form-section">
-          <DepositForm pool={pool} onDeposit={handleDeposit} />
+          <DepositForm 
+            pool={pool} 
+            onSuccess={handleSuccess}
+          />
         </div>
       </div>
     </div>

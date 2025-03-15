@@ -1,22 +1,28 @@
-// 📁 hooks/useDeposit.ts
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAccount } from 'wagmi';
 import { DepositData, PoolData } from '../types';
-import { depositToPool, getPoolCurrentPrice, getTokenBalance } from '../web3/api/depositApi';
+import { depositToPool, getTokenBalance } from '../web3/api/depositApi';
+import { getPoolCurrentPrice } from '../web3/api/poolHelper';
 
 interface UseDepositReturn {
   isLoading: boolean;
   error: string | null;
   currentPrice: number | undefined;
   currentTick: number | undefined;
-  tokenBalance: string;
+  priceView: 'token0' | 'token1';
+  togglePriceView: () => void;
+  getDisplayPrice: (pool: PoolData) => number;
+  calculatePriceRange: (percentage?: number) => {
+    minPrice: number;
+    maxPrice: number;
+    width: number;
+  };
   fetchPoolPrice: (poolAddress: string) => Promise<void>;
-  fetchTokenBalance: (tokenAddress: string) => Promise<void>;
   deposit: (pool: PoolData, depositData: DepositData) => Promise<{
     success: boolean;
     txHash?: string;
     nftId?: number;
-  }>;
+  } | undefined>;
 }
 
 export function useDeposit(): UseDepositReturn {
@@ -25,7 +31,7 @@ export function useDeposit(): UseDepositReturn {
   const [error, setError] = useState<string | null>(null);
   const [currentPrice, setCurrentPrice] = useState<number | undefined>(undefined);
   const [currentTick, setCurrentTick] = useState<number | undefined>(undefined);
-  const [tokenBalance, setTokenBalance] = useState<string>('0');
+  const [priceView, setPriceView] = useState<'token0' | 'token1'>('token0');
   
   const fetchPoolPrice = async (poolAddress: string): Promise<void> => {
     try {
@@ -38,26 +44,37 @@ export function useDeposit(): UseDepositReturn {
     }
   };
   
-  const fetchTokenBalance = async (tokenAddress: string): Promise<void> => {
-    if (!isConnected || !address) {
-      setTokenBalance('0');
-      return;
-    }
-    
-    try {
-      const balance = await getTokenBalance(tokenAddress, address);
-      setTokenBalance(balance);
-    } catch (err) {
-      console.error('Error fetching token balance:', err);
-      setTokenBalance('0');
-    }
+  // Toggle between token0 and token1 price view
+  const togglePriceView = () => {
+    setPriceView(prev => prev === 'token0' ? 'token1' : 'token0');
   };
   
-  const deposit = async (pool: PoolData, depositData: DepositData): Promise<{
-    success: boolean;
-    txHash?: string;
-    nftId?: number;
-  }> => {
+  // Calculate price range based on current price and percentage
+  const calculatePriceRange = (percentage?: number): { minPrice: number; maxPrice: number; width: number } => {
+    // Default to 12.4% if percentage is not provided
+    const rangePercent = percentage !== undefined ? percentage : 12.4;
+    
+    if (!currentPrice) return { minPrice: 0, maxPrice: 0, width: 0 };
+    
+    const minPercent = 1 - (rangePercent / 100);
+    const maxPercent = 1 + (rangePercent / 100);
+    
+    return {
+      minPrice: currentPrice * minPercent,
+      maxPrice: currentPrice * maxPercent,
+      width: rangePercent * 2
+    };
+  };
+  
+  // Get price in the correct format based on current view
+  const getDisplayPrice = (pool: PoolData): number => {
+    if (!currentPrice) return 0;
+    
+    // If viewing from token1 perspective, invert the price
+    return priceView === 'token0' ? currentPrice : (1 / currentPrice);
+  };
+  
+  const deposit = async (pool: PoolData, depositData: DepositData) => {
     if (!isConnected || !address) {
       setError('Wallet not connected');
       return { success: false };
@@ -97,9 +114,11 @@ export function useDeposit(): UseDepositReturn {
     error, 
     currentPrice, 
     currentTick,
-    tokenBalance,
+    priceView,
+    togglePriceView,
+    getDisplayPrice,
+    calculatePriceRange,
     fetchPoolPrice,
-    fetchTokenBalance,
     deposit 
   };
 }
